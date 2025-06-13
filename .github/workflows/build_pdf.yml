@@ -1,0 +1,37 @@
+name: Auto-Compile LaTeX and Release
+
+on:
+  push:
+    branches:
+      - main # Trigger on pushes to the main branch
+    paths:
+      - '**/*.tex' # Any LaTeX file change in the repo
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest # The operating system where the job will run
+    steps:
+    - uses: actions/checkout@v4 # Action to check out your repository code
+
+    - name: Compile LaTeX
+      uses: xu-cheng/latex-action@v2 # Action to compile LaTeX documents
+      with:
+        root_file: main.tex # Specifies the main .tex file to compile in your repo
+        args: -xelatex # Uses xelatex compiler for broader compatibility
+
+    - name: Create Release and Upload PDF
+      id: create_release # Unique ID for this step
+      uses: softprops/action-gh-release@v2 # Action to create a GitHub Release
+      if: startsWith(github.ref, 'refs/heads/main') # Ensures it only runs on pushes to 'main' branch
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub's auto-generated token for authentication
+      with:
+        tag_name: v${{ github.run_number }} # Auto-generates a version tag (e.g., v1, v2, v3...)
+        name: Auto-Release ${{ github.run_number }} # Auto-generates the Release Title
+        body: | # This is the Release Description (Markdown supported)
+          Automated release for ${{ github.event.repository.name }}.
+          Version: ${{ github.run_number }}
+
+          This content is a raw, unreviewed derivation from the author's notes. Use at your own risk.
+        files: |
+          main.pdf # The compiled PDF file that will be attached to the release
