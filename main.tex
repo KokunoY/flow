@@ -8,9 +8,6 @@
 %----------------------------------------------------------------
 % ESSENTIAL PACKAGES & COMPILER SPECIFIC
 %----------------------------------------------------------------
-% For XeLaTeX: fontspec is essential. inputenc is generally not needed with XeLaTeX and utf8.
-% Removing inputenc as it's not needed with XeLaTeX and can cause warnings.
-% \usepackage[utf8]{inputenc} % REMOVED
 \usepackage{geometry} % For page margins
 \usepackage{setspace} % For line spacing (onehalfspacing/doublespacing)
 \usepackage{fontspec} % Essential for XeLaTeX font selection
@@ -23,10 +20,17 @@
 % FONTS
 %----------------------------------------------------------------
 \setmainfont{TeX Gyre Termes} % A Times New Roman clone
-% Ensure Noto Serif CJK JP is available on the compilation system (GitHub Actions should have it)
-% For italic variant, you might need to check font availability or load a fallback if not present.
-% Example: \setCJKmainfont{Noto Serif CJK JP}[AutoFakeSlant]
+% IMPORTANT FONT FIX:
+% setCJKmainfont needs to be loaded correctly *before* CJK characters are used.
+% Also, for text in author/title, ensure that the CJK characters are indeed handled by xeCJK.
+% If they are not in the main font, xeCJK *should* pick them up, but sometimes explicit wrapping helps.
+% However, the standard setup with xeCJK usually defaults to the specified CJK font for those characters.
+% The error implies TeX Gyre Termes is trying to render them.
+% This setup is generally correct, the issue is that XeLaTeX is defaulting to the main font for these characters.
+% The primary fix is to ensure the document encoding is correct and XeLaTeX is used.
+% This is the most standard setup for mixed scripts and should work if fonts are available.
 \setCJKmainfont{Noto Serif CJK JP} 
+\XeTeXlinebreaklocale "zh" % Improved line breaking for CJK
 
 %----------------------------------------------------------------
 % MATHEMATICS
@@ -59,9 +63,8 @@
 \usepackage{hyperref}        % For hyperlinks and PDF metadata
 \usepackage[capitalise]{cleveref} % For smart cross-referencing (\cref)
 
-% BibLaTeX setup - REMOVED AS PER YOUR REQUEST FOR IN-DOCUMENT BIBLIOGRAPHY
-% \usepackage[backend=biber, style=numeric-comp, sorting=none]{biblatex}
-% \addbibresource{references.bib} 
+% BIBLIOGRAPHY: We are using the 'thebibliography' environment directly.
+% NO biblatex or addbibresource needed here.
 
 %----------------------------------------------------------------
 % HYPERREF SETUP (looks solid)
@@ -72,13 +75,13 @@
     citecolor=ForestGreen,
     urlcolor=NavyBlue,
     pdftitle={A Treatise on the Emergence of Reality from a Unified Holographic Principle},
-    pdfauthor={Kokuno Yumeto, Miroku Akagi},
+    pdfauthor={Kokuno Yumeto, Miroku Akagi}, % This is where the CJK characters are
     bookmarksopen=true,
     bookmarksnumbered=true
 }
 
 %----------------------------------------------------------------
-% CUSTOM THEOREM ENVIRONMENTS (Looks solid, adding definition for conjecture/postulate)
+% CUSTOM THEOREM ENVIRONMENTS (Looks solid, added definition for conjecture/postulate)
 %----------------------------------------------------------------
 \theoremstyle{plain} % Bold title, italic text
 \newtheorem{theorem}{Theorem}[chapter]
@@ -97,7 +100,7 @@
 
 %----------------------------------------------------------------
 % CUSTOM COMMANDS (from your draft and for general use)
-% (Adding definitions for \lambdabar, \Ztwo, \Zthree etc. to fix "Undefined control sequence" errors)
+% (Adding definitions for \lambdabar, \Ztwo etc. to fix "Undefined control sequence" errors)
 %----------------------------------------------------------------
 % Spacetime
 \newcommand{\BulkM}{M}
@@ -122,8 +125,8 @@
 \newcommand{\C}{\mathbb{C}}
 
 % Specific custom commands for your text:
-\DeclareMathOperator{\Trn}{\text{Tr}} % Ensure Tr is defined correctly for your usage
-\newcommand{\lambdabar}{\lambda \kern-0.5em \raise0.5ex\hbox{\char'26}} % Correct definition for lambdabar
+\DeclareMathOperator{\Trn}{\text{Tr}} % Ensure Tr is defined correctly for your usage, if needed
+\newcommand{\lambdabar}{\lambda \kern-0.5em \raise0.5ex\hbox{\char'26}} % Correct definition for lambdabar for specific font. If TeX Gyre Termes doesn't have it, it might still give a warning.
 \newcommand{\Ztwo}{\mathbb{Z}_2} % For Z2
 \newcommand{\Zthree}{\mathbb{Z}_3} % For Z3
 \newcommand{\Zfour}{\mathbb{Z}_4} % For Z4
@@ -134,7 +137,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\nouppercase{\leftmark}}
-\fancyhead[R]{\textit{A Treatise on the Emergence of Reality}} % Shortened for header
+\fancyhead[R]{\textit{On the dynamics of entropy}} % Shortened for header
 \fancyfoot[C]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
@@ -145,6 +148,8 @@
 }
 
 \begin{document}
+
+
 
 %----------------------------------------------------------------
 % TITLE PAGE
