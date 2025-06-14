@@ -5,13 +5,12 @@ on:
     branches:
       - main
     paths:
-      - '**/*.tex'
+      - '**.tex'
 
 jobs:
   build_release_asset:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     permissions:
       contents: write
 
@@ -22,42 +21,41 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Install Utilities
-      run: apk update && apk add zip jq
+    - name: Install Zip Utility
+      run: apk update && apk add zip
 
-    - name: Compile LaTeX (Force Max Compatibility and Error Handling)
+    - name: Compile LaTeX to PDF (Force Output, Ignore Errors)
       uses: xu-cheng/latex-action@v2
       id: compile_latex
       with:
         root_file: main.tex
         compiler: xelatex
-        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
-        ignore_errors: true
+        args: -file-line-error -interaction=nonstopmode -halt-on-error=false
       continue-on-error: true
 
-    - name: Prepare PDF and source files for Release (ZIP it up)
-      id: prepare_content
+    - name: Prepare Combined ZIP for Release
+      id: prepare_combined_zip
       run: |
-        RELEASE_DIR="release_content"
-        mkdir -p "$RELEASE_DIR"
+        FINAL_ZIP_NAME="${{ github.event.repository.name }}_${{ github.sha }}.zip"
+        ZIP_STAGING_DIR="release_content"
+        mkdir -p "$ZIP_STAGING_DIR"
 
         if [ -f "main.pdf" ]; then
-          mv "main.pdf" "$RELEASE_DIR/main.pdf"
+          mv "main.pdf" "$ZIP_STAGING_DIR/main.pdf"
         else
-          echo "PDF compilation failed or PDF not found. Placeholder created."
-          echo "No main.pdf generated." > "$RELEASE_DIR/compilation_failed.txt"
+          echo "PDF compilation failed, main.pdf not found." > "$ZIP_STAGING_DIR/COMPILATION_FAILED.txt"
         fi
 
-        find . -maxdepth 1 -name "*.tex" -exec cp {} "$RELEASE_DIR/" \;
+        find . -maxdepth 1 -name "*.tex" -exec cp {} "$ZIP_STAGING_DIR/" \;
 
-        zip -r "${{ github.event.repository.name }}_release_${{ github.run_number }}.zip" "$RELEASE_DIR/"
+        zip -r "$FINAL_ZIP_NAME" "$ZIP_STAGING_DIR"
+        
+        echo "final_zip_name=$FINAL_ZIP_NAME" >> "$GITHUB_OUTPUT"
+        echo "zip_prepared=true" >> "$GITHUB_OUTPUT"
 
-        echo "release_zip_name=${{ github.event.repository.name }}_release_${{ github.run_number }}.zip" >> "$GITHUB_OUTPUT"
-        echo "content_ready=true" >> "$GITHUB_OUTPUT"
-
-    - name: Create Release and Upload Asset
+    - name: Create GitHub Release and Upload Combined ZIP
       uses: softprops/action-gh-release@v2
-      if: steps.prepare_content.outputs.content_ready == 'true'
+      if: steps.prepare_combined_zip.outputs.zip_prepared == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -65,5 +63,6 @@ jobs:
         name: Automated Release ${{ github.run_number }}
         body: |
           Latest automated build and release of the physics work.
+          This release contains the compiled PDF and source files in a single ZIP archive for Zenodo integration.
         files: |
-          ${{ steps.prepare_content.outputs.release_zip_name }}
+          ${{ steps.prepare_combined_zip.outputs.final_zip_name }}
