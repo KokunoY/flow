@@ -9,33 +9,30 @@ on:
 
 jobs:
   build_and_release:
-    runs-on: ubuntu-latest # Standard runner, but we'll use a Docker image inside
-    timeout-minutes: 15 # Set a generous timeout for the overall job, though it should be fast now
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # Set a generous timeout
 
     container: # Use a specific Docker container for the job
       image: "ghcr.io/xu-cheng/texlive-full:latest" # This image has full TeX Live (including XeLaTeX) pre-installed
-      # Alternatives if this one has issues or is too large:
-      # image: "ghcr.io/latex_actions/latex:latest" (lighter, but might need manual package install for specific fonts)
-      # image: "pandoc/latex:latest" (also pre-built TeX Live)
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    # REMOVED: No need for setup-texlive-action or manual apt-get install
-    # as TeX Live is already in the Docker image.
 
     - name: Compile LaTeX
       uses: xu-cheng/latex-action@v2
       id: compile_latex
       with:
         root_file: main.tex
-        args: -xelatex -file-line-error -interaction=nonstopmode # Ensure xelatex is used
+        # Explicitly set the compiler to xelatex, and remove conflicting args or defaults
+        compiler: xelatex
+        args: -file-line-error -interaction=nonstopmode # Ensure -no-pdf is NOT here
+        # The output PDF will be in the working directory (/github/workspace/main.pdf by default)
 
     - name: Check for compiled PDF
       run: |
         if [ ! -f main.pdf ]; then
-          echo "Error: main.pdf was not created by LaTeX compilation."
+          echo "Error: main.pdf was not created by LaTeX compilation. Check Compile LaTeX step logs."
           exit 1
         else
           echo "main.pdf successfully created."
