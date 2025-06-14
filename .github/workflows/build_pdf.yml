@@ -1,163 +1,71 @@
-name: Auto-Compile LaTeX and Sync to Zenodo
+name: Auto-Compile LaTeX and Release
 
 on:
   push:
     branches:
-      - main # Trigger on push to the main branch
+      - main
     paths:
-      - '**/*.tex' # Any change to a .tex file triggers the workflow
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
-
-env:
-  MAIN_TEX_FILE: V74.tex # <--- IMPORTANT: Adjust this if your main LaTeX file is NOT named V74.tex (e.g., main.tex)
-  OUTPUT_PDF_NAME: V74.pdf # <--- IMPORTANT: Adjust this to match your PDF output name (e.g., main.pdf)
-  RELEASE_ZIP_NAME: ${{ github.event.repository.name }}_release_${{ github.run_number }}.zip
+      - '**/*.tex'
 
 jobs:
-  build_and_upload:
-    runs-on: ubuntu-latest # This is the runner OS, but the container image overrides its environment
-
-    # Set overall job timeout
+  build_and_release:
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Permissions needed for creating GitHub Releases
     permissions:
       contents: write
 
-    # Specify the Docker image for the job environment
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest" 
+      image: "ghcr.io/xu-cheng/texlive-full:latest"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # FIX: Use 'apk' for package installation on Alpine-based Docker image
-      - name: Install Zip Utility
-        # This 'run' step will execute inside the container defined above.
-        run: |
-          apk update && apk add zip
-        # We don't set continue-on-error here explicitly because if zip isn't installed,
-        # subsequent steps that rely on it will fail anyway. If this still fails,
-        # it means the 'zip' package might be named differently or the base image is not Alpine.
-        # But 'apk add zip' is the standard for Alpine.
+    - name: Ensure Zip Utility is installed
+      run: apk update && apk add zip
 
-      - name: Compile LaTeX to PDF (Force Output, Ignore Errors)
-        uses: xu-cheng/latex-action@v2
-        id: compile_latex
-        with:
-          root_file: ${{ env.MAIN_TEX_FILE }}
-          compiler: xelatex
-          # Aggressive args for latexmk to force PDF creation even with errors
-          args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
-          ignore_errors: true # Tell the GitHub Action to not fail this step on LaTeX errors
-        continue-on-error: true # Ensure the workflow continues even if LaTeX compilation is problematic
+    - name: Compile LaTeX (Force Max Compatibility and Error Handling)
+      uses: xu-cheng/latex-action@v2
+      id: compile_latex
+      with:
+        root_file: main.tex
+        compiler: xelatex
+        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
+        ignore_errors: true
+      continue-on-error: true
 
-      - name: Check for compiled PDF & Prepare ZIP
-        id: prepare_zip
-        # This step should always attempt to run to either report PDF not found or create ZIP
-        run: |
-          if [ ! -f ${{ env.OUTPUT_PDF_NAME }} ]; then
-            echo "Error: ${{ env.OUTPUT_PDF_NAME }} was NOT created by LaTeX compilation. Cannot proceed with ZIP or Zenodo upload for this run."
-            echo "pdf_exists=false" >> "$GITHUB_OUTPUT"
-            # This is a critical point. If PDF isn't made, no point trying to zip/upload.
-            # We set pdf_exists=false so subsequent steps can use 'if' conditions to skip.
-            # We won't exit with code 1 here, allowing the overall workflow to report success if other steps are skipped.
-          else
-            echo "${{ env.OUTPUT_PDF_NAME }} successfully created (may be partial/error-ridden)."
-            echo "pdf_exists=true" >> "$GITHUB_OUTPUT"
+    - name: Prepare PDF for Release (ZIP it up)
+      id: prepare_pdf_zip
+      run: |
+        PDF_FILE="main.pdf"
+        ZIP_FILE="${{ github.event.repository.name }}_release_${{ github.run_number }}.zip"
 
-            # Create a temporary directory to structure the zip file content
-            mkdir -p temp_release_content
-            cp ${{ env.OUTPUT_PDF_NAME }} temp_release_content/
-            
-            # Create the ZIP archive
-            zip -r ${{ env.RELEASE_ZIP_NAME }} temp_release_content/
-            echo "Created release archive: ${{ env.RELEASE_ZIP_NAME }}"
-          fi
+        if [ ! -f "$PDF_FILE" ]; then
+          touch empty_placeholder.txt
+          zip "$ZIP_FILE" empty_placeholder.txt
+          echo "zip_created=true" >> "$GITHUB_OUTPUT"
+          echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+        else
+          mkdir -p release_content
+          mv "$PDF_FILE" release_content/
+          zip -r "$ZIP_FILE" release_content/
+          echo "zip_created=true" >> "$GITHUB_OUTPUT"
+          echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+        fi
 
-      - name: Create GitHub Release and Upload ZIP
-        uses: softprops/action-gh-release@v2
-        # Only run if PDF existed and ZIP was prepared
-        if: steps.prepare_zip.outputs.pdf_exists == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: zenodo-sync-v${{ github.run_number }} # Unique tag for Zenodo sync
-          name: Automated Zenodo Sync Release ${{ github.run_number }}
-          body: |
-            Automated sync from GitHub Push.
-            This PDF is generated from the latest push to 'main' and may contain compilation errors or be incomplete.
-            Generated from commit: ${{ github.sha }}
+    - name: Create Release and Upload ZIP
+      uses: softprops/action-gh-release@v2
+      if: steps.prepare_pdf_zip.outputs.zip_created == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Auto-Release ${{ github.run_number }}
+        body: |
+          Automated release for ${{ github.event.repository.name }}.
+          Version: ${{ github.run_number }}
 
-            **Zenodo Sync Status:** Attempted to upload ZIP for Zenodo integration via GitHub Release.
-          files: |
-            ${{ env.RELEASE_ZIP_NAME }} # Upload the generated ZIP file
-
-      # Direct Zenodo API upload (alternative/redundant if GitHub Release integration works)
-      - name: Directly Upload ZIP to Zenodo Deposit
-        # Only run if PDF existed and ZIP was prepared
-        if: steps.prepare_zip.outputs.pdf_exists == 'true'
-        run: |
-          DEPOSITION_ID=${{ secrets.ZENODO_DEPOSITION_ID }}
-          ZENODO_TOKEN=${{ secrets.ZENODO_TOKEN }}
-          ZIP_FILE_TO_UPLOAD="${{ env.RELEASE_ZIP_NAME }}"
-
-          ZENODO_API_URL="https://zenodo.org/api/deposit/depositions/" # Use "https://sandbox.zenodo.org/api/deposit/depositions/" for testing
-
-          # 1. Get the latest draft version of the deposit
-          DEPOSIT_DETAILS=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_API_URL$DEPOSITION_ID")
-          DRAFT_URL=$(echo "$DEPOSIT_DETAILS" | jq -r '.links.latest_draft')
-          
-          if [ "$DRAFT_URL" == "null" ]; then
-              echo "Error: Could not find latest draft URL for deposit $DEPOSITION_ID. Deposit might not exist or token is invalid. Skipping direct Zenodo upload."
-              exit 0 # Exit 0 to allow the overall workflow to pass, as per your request
-          fi
-
-          DEPOSIT_ID_DRAFT=$(echo "$DRAFT_URL" | grep -oE '[0-9]+$')
-          if [ -z "$DEPOSIT_ID_DRAFT" ]; then
-              echo "Error: Could not extract draft ID from URL: $DRAFT_URL. Skipping direct Zenodo upload."
-              exit 0 # Exit 0 to allow the overall workflow to pass
-          fi
-
-          echo "Working with deposit draft ID: $DEPOSIT_ID_DRAFT"
-
-          # 2. Delete existing files that match the new ZIP's base name
-          FILES_JSON=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_API_URL$DEPOSIT_ID_DRAFT/files")
-          FILE_ID_TO_DELETE=$(echo "$FILES_JSON" | jq -r --arg filename "$ZIP_FILE_TO_UPLOAD" '.[] | select(.filename == $filename) | .id')
-
-          if [ -n "$FILE_ID_TO_DELETE" ]; then
-              echo "Deleting existing file '$ZIP_FILE_TO_UPLOAD' (ID: $FILE_ID_TO_DELETE) from Zenodo deposit $DEPOSIT_ID_DRAFT..."
-              DELETE_RESPONSE=$(curl -s -X DELETE -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_API_URL$DEPOSIT_ID_DRAFT/files/$FILE_ID_TO_DELETE")
-              echo "Delete response: $DELETE_RESPONSE"
-              if echo "$DELETE_RESPONSE" | grep -q "204 No Content"; then
-                  echo "Successfully deleted existing file."
-              else
-                  echo "Failed to delete existing file. Continuing upload, but this might cause issues on Zenodo."
-              fi
-          else
-              echo "No existing file '$ZIP_FILE_TO_UPLOAD' found in Zenodo deposit $DEPOSIT_ID_DRAFT."
-          fi
-
-          # 3. Upload the new ZIP file
-          BUCKET_URL=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_API_URL$DEPOSIT_ID_DRAFT" | jq -r '.links.bucket')
-
-          if [ "$BUCKET_URL" == "null" ]; then
-              echo "Error: Could not retrieve bucket URL for deposit $DEPOSIT_ID_DRAFT. Check deposit status. Skipping direct Zenodo upload."
-              exit 0 # Exit 0 to allow the overall workflow to pass
-          fi
-
-          echo "Uploading $ZIP_FILE_TO_UPLOAD to Zenodo bucket: $BUCKET_URL"
-          UPLOAD_RESPONSE=$(curl -s -X PUT -H "Authorization: Bearer $ZENODO_TOKEN" --data-binary "@$ZIP_FILE_TO_UPLOAD" "$BUCKET_URL/$ZIP_FILE_TO_UPLOAD")
-          echo "Upload response: $UPLOAD_RESPONSE"
-
-          if echo "$UPLOAD_RESPONSE" | jq -e 'has("checksum")' > /dev/null; then
-              echo "File uploaded successfully to Zenodo."
-          else
-              echo "Error uploading file to Zenodo: $UPLOAD_RESPONSE. This is a problem, but continuing as requested."
-              # No exit 1 here, to prioritize the workflow completing without stopping.
-          fi
-        env:
-          # Use GITHUB_TOKEN for actions requiring GitHub API, ZENODO_TOKEN for Zenodo API
-          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
-          ZENODO_DEPOSITION_ID: ${{ secrets.ZENODO_DEPOSITION_ID }}
+          This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
+        files: |
+          ${{ steps.prepare_pdf_zip.outputs.zip_file_name }}
