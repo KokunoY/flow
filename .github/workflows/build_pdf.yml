@@ -3,19 +3,23 @@ name: Auto-Compile LaTeX and Release
 on:
   push:
     branches:
-      - main # Trigger on pushes to the main branch
+      - main
     paths:
-      - '**/*.tex' # Any LaTeX file change in the repo
+      - '**/*.tex'
 
 jobs:
   build_and_release:
-    runs-on: ubuntu-latest # Standard runner
-    timeout-minutes: 15 # Set a generous timeout
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # Generous timeout for overall job
 
-    container: # Job runs inside this Docker container
+    # *** IMPORTANT PERMISSION FIX ***
+    permissions:
+      contents: write # This grants the necessary permission to create GitHub Releases
+
+    container:
       image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
 
-    steps: # List of steps in the job
+    steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
@@ -24,7 +28,8 @@ jobs:
       id: compile_latex
       with:
         root_file: main.tex
-        compiler: pdflatex # Using pdflatex for maximum robustness
+        # *** COMPILER FIX: Use xelatex, as main.tex requires fontspec ***
+        compiler: xelatex
         args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
         ignore_errors: true # Force the action to report success for this step even with LaTeX errors
       continue-on-error: true # Ensure the *workflow step* itself doesn't fail the job
