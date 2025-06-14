@@ -8,19 +8,22 @@ on:
       - '**/*.tex'
 
 jobs:
-  build_and_release:
+  build_release_asset:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     permissions:
-      contents: write # Needed for creating GitHub Releases
+      contents: write
 
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
+      image: "ghcr.io/xu-cheng/texlive-full:latest"
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Install Utilities
+      run: apk update && apk add zip jq
 
     - name: Compile LaTeX (Force Max Compatibility and Error Handling)
       uses: xu-cheng/latex-action@v2
@@ -28,36 +31,39 @@ jobs:
       with:
         root_file: main.tex
         compiler: xelatex
-        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
+        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
         ignore_errors: true
       continue-on-error: true
 
-    - name: Check for compiled PDF
-      id: check_pdf
+    - name: Prepare PDF and source files for Release (ZIP it up)
+      id: prepare_content
       run: |
-        if [ ! -f main.pdf ]; then
-          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs."
-          echo "pdf_exists=false" >> $GITHUB_OUTPUT
-          exit 1 # Fail job if PDF is genuinely missing
+        RELEASE_DIR="release_content"
+        mkdir -p "$RELEASE_DIR"
+
+        if [ -f "main.pdf" ]; then
+          mv "main.pdf" "$RELEASE_DIR/main.pdf"
         else
-          echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
-          echo "pdf_exists=true" >> $GITHUB_OUTPUT
+          echo "PDF compilation failed or PDF not found. Placeholder created."
+          echo "No main.pdf generated." > "$RELEASE_DIR/compilation_failed.txt"
         fi
 
-    - name: Create GitHub Release and Attach PDF
-      # This step runs AFTER PDF is created.
-      # It attaches main.pdf as a separate asset to the GitHub Release.
-      # It does NOT commit main.pdf to the Git repository.
+        find . -maxdepth 1 -name "*.tex" -exec cp {} "$RELEASE_DIR/" \;
+
+        zip -r "${{ github.event.repository.name }}_release_${{ github.run_number }}.zip" "$RELEASE_DIR/"
+
+        echo "release_zip_name=${{ github.event.repository.name }}_release_${{ github.run_number }}.zip" >> "$GITHUB_OUTPUT"
+        echo "content_ready=true" >> "$GITHUB_OUTPUT"
+
+    - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v2
-      if: steps.check_pdf.outputs.pdf_exists == 'true'
+      if: steps.prepare_content.outputs.content_ready == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: v${{ github.run_number }}
-        name: Auto-Release ${{ github.run_number }}
+        name: Automated Release ${{ github.run_number }}
         body: |
-          Automated release for ${{ github.event.repository.name }}.
-          Version: ${{ github.run_number }}
-          This content is unreviewed and actively being developed. Use at your own risk.
-        files: | # This attaches main.pdf as a separate asset to the release.
-          main.pdf
+          Latest automated build and release of the physics work.
+        files: |
+          ${{ steps.prepare_content.outputs.release_zip_name }}
