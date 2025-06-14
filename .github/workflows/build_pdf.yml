@@ -9,49 +9,21 @@ on:
 
 jobs:
   build_and_release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15 # Set a reasonable timeout, should be enough for XeLaTeX only
+    runs-on: ubuntu-latest # Standard runner, but we'll use a Docker image inside
+    timeout-minutes: 15 # Set a generous timeout for the overall job, though it should be fast now
+
+    container: # Use a specific Docker container for the job
+      image: "ghcr.io/xu-cheng/texlive-full:latest" # This image has full TeX Live (including XeLaTeX) pre-installed
+      # Alternatives if this one has issues or is too large:
+      # image: "ghcr.io/latex_actions/latex:latest" (lighter, but might need manual package install for specific fonts)
+      # image: "pandoc/latex:latest" (also pre-built TeX Live)
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up TeX Live environment (XeLaTeX only)
-      uses: TeX-Live/setup-texlive-action@v2
-      with:
-        # Use a smaller profile to speed up installation
-        profile: medium-scheme # or 'minimal-scheme' if you want even smaller
-        # Explicitly install packages needed for XeLaTeX and common fonts
-        packages: |
-          collection-xetex
-          collection-fontsrecommended
-          collection-latexrecommended
-          collection-binex
-          collection-pictures
-          collection-science
-          collection-publishers
-          collection-humanities
-          biber # Needed if you decide to use biblatex in the future
-          latexmk # Tool for robust compilation, used by default with xu-cheng/latex-action
-          amsfonts # Explicitly add if not covered by recommended collections
-          amsmath # Explicitly add if not covered by recommended collections
-          amssymb # Explicitly add if not covered by recommended collections
-          amsthm # Explicitly add if not covered by recommended collections
-          mathtools # Explicitly add if not covered by recommended collections
-          bm # Explicitly add if not covered by recommended collections
-          physics # Explicitly add if not covered by recommended collections
-          slashed # Explicitly add if not covered by recommended collections
-          fancyhdr # Explicitly add if not covered by recommended collections
-          microtype # Explicitly add if not covered by recommended collections
-          xcolor # Explicitly add if not covered by recommended collections
-          hyperref # Explicitly add if not covered by recommended collections
-          cleveref # Explicitly add if not covered by recommended collections
-          enumitem # CRITICAL: Explicitly ensure enumitem is installed
-          xparse # Explicitly add if not covered by recommended collections
-          xecjk # Explicitly add for CJK support (as you use xeCJK in preamble)
-          fontspec # Explicitly add for font selection with XeLaTeX
-          texgyre # Explicitly add for TeX Gyre Termes font
-          noto # Explicitly add for Noto Serif CJK JP font
+    # REMOVED: No need for setup-texlive-action or manual apt-get install
+    # as TeX Live is already in the Docker image.
 
     - name: Compile LaTeX
       uses: xu-cheng/latex-action@v2
