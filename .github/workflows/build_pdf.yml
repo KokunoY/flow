@@ -13,17 +13,14 @@ jobs:
     timeout-minutes: 15
 
     permissions:
-      contents: write
+      contents: write # Needed for creating GitHub Releases
 
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest"
+      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Ensure Zip Utility is installed
-      run: apk update && apk add zip
 
     - name: Compile LaTeX (Force Max Compatibility and Error Handling)
       uses: xu-cheng/latex-action@v2
@@ -31,57 +28,36 @@ jobs:
       with:
         root_file: main.tex
         compiler: xelatex
-        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
+        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
         ignore_errors: true
-      continue-on-error: true # Ensure the workflow continues even if this step has errors
+      continue-on-error: true
 
-    - name: Prepare PDF and source files for Release (ZIP it up)
-      id: prepare_zip
+    - name: Check for compiled PDF
+      id: check_pdf
       run: |
-        PDF_FILE="main.pdf"
-        ZIP_FILE="${{ github.event.repository.name }}_release_${{ github.run_number }}.zip"
-        
-        # Create a dedicated directory to stage all files for the ZIP
-        mkdir -p zip_stage_content
-
-        # Check if PDF exists and move it to the staging directory
-        if [ -f "$PDF_FILE" ]; then
-          mv "$PDF_FILE" zip_stage_content/
+        if [ ! -f main.pdf ]; then
+          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs."
+          echo "pdf_exists=false" >> $GITHUB_OUTPUT
+          exit 1 # Fail job if PDF is genuinely missing
         else
-          # If PDF not found, include a simple text file to indicate this
-          echo "PDF compilation failed or PDF not found." > zip_stage_content/compilation_status.txt
-          echo "No '$PDF_FILE' was generated. This ZIP only contains source files." >> zip_stage_content/compilation_status.txt
+          echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
+          echo "pdf_exists=true" >> $GITHUB_OUTPUT
         fi
 
-        # Copy all .tex files (and potentially other source files like figures) into the staging directory
-        # This copies .tex files from the root.
-        find . -maxdepth 1 -name "*.tex" -exec cp {} zip_stage_content/ \;
-        # If you have other source directories like 'chapters/' or 'figures/', add them here:
-        # cp -r chapters/ zip_stage_content/
-        # cp -r figures/ zip_stage_content/
-
-        # Create the ZIP archive from the content of 'zip_stage_content'
-        # The -r flag includes the directory itself, so 'zip_stage_content' will be the top folder inside the ZIP.
-        # If you prefer files directly in the root of the ZIP, use `zip -j` or `cd zip_stage_content && zip -r ../$ZIP_FILE .`
-        zip -r "$ZIP_FILE" zip_stage_content/
-
-        echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
-        echo "zip_creation_successful=true" >> "$GITHUB_OUTPUT" # Indicate success to the next step
-
-    - name: Create Release and Upload ZIP
+    - name: Create GitHub Release and Attach PDF
+      # This step runs AFTER PDF is created.
+      # It attaches main.pdf as a separate asset to the GitHub Release.
+      # It does NOT commit main.pdf to the Git repository.
       uses: softprops/action-gh-release@v2
-      # This step should only run if the ZIP creation was successful.
-      if: steps.prepare_zip.outputs.zip_creation_successful == 'true'
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v${{ github.run_number }} # Creates a unique tag for the release
-        name: Automated Release ${{ github.run_number }}
+        tag_name: v${{ github.run_number }}
+        name: Auto-Release ${{ github.run_number }}
         body: |
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
-
-          This release contains the compiled PDF and source files in a single ZIP archive, for Zenodo integration.
-          The PDF included may be incomplete if compilation errors occurred.
-        files: |
-          ${{ steps.prepare_zip.outputs.zip_file_name }} # Upload only the generated ZIP file
+          This content is unreviewed and actively being developed. Use at your own risk.
+        files: | # This attaches main.pdf as a separate asset to the release.
+          main.pdf
