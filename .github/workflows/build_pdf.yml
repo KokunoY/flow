@@ -53,6 +53,6 @@ jobs:
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
 
-          This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
+          This content is unreviewed and actively being developed. Use at your own risk.
         files: |
           main.pdf
