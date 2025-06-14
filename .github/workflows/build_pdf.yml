@@ -9,28 +9,56 @@ on:
 
 jobs:
   build_and_release:
-    runs-on: ubuntu-latest # The operating system where the job will run
-    timeout-minutes: 10 # Add a timeout to prevent long runs if it hangs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # Set a reasonable timeout, should be enough for XeLaTeX only
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4 # Action to check out your repository code
+      uses: actions/checkout@v4
 
-    - name: Set up LaTeX environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y texlive-full # Install full TeX Live to ensure all packages are present
-        sudo apt-get install -y texlive-fonts-extra texlive-xetex # Specific for XeLaTeX and fonts if not in full
+    - name: Set up TeX Live environment (XeLaTeX only)
+      uses: TeX-Live/setup-texlive-action@v2
+      with:
+        # Use a smaller profile to speed up installation
+        profile: medium-scheme # or 'minimal-scheme' if you want even smaller
+        # Explicitly install packages needed for XeLaTeX and common fonts
+        packages: |
+          collection-xetex
+          collection-fontsrecommended
+          collection-latexrecommended
+          collection-binex
+          collection-pictures
+          collection-science
+          collection-publishers
+          collection-humanities
+          biber # Needed if you decide to use biblatex in the future
+          latexmk # Tool for robust compilation, used by default with xu-cheng/latex-action
+          amsfonts # Explicitly add if not covered by recommended collections
+          amsmath # Explicitly add if not covered by recommended collections
+          amssymb # Explicitly add if not covered by recommended collections
+          amsthm # Explicitly add if not covered by recommended collections
+          mathtools # Explicitly add if not covered by recommended collections
+          bm # Explicitly add if not covered by recommended collections
+          physics # Explicitly add if not covered by recommended collections
+          slashed # Explicitly add if not covered by recommended collections
+          fancyhdr # Explicitly add if not covered by recommended collections
+          microtype # Explicitly add if not covered by recommended collections
+          xcolor # Explicitly add if not covered by recommended collections
+          hyperref # Explicitly add if not covered by recommended collections
+          cleveref # Explicitly add if not covered by recommended collections
+          enumitem # CRITICAL: Explicitly ensure enumitem is installed
+          xparse # Explicitly add if not covered by recommended collections
+          xecjk # Explicitly add for CJK support (as you use xeCJK in preamble)
+          fontspec # Explicitly add for font selection with XeLaTeX
+          texgyre # Explicitly add for TeX Gyre Termes font
+          noto # Explicitly add for Noto Serif CJK JP font
 
     - name: Compile LaTeX
-      uses: xu-cheng/latex-action@v2 # Action to compile LaTeX documents
-      id: compile_latex # Add an ID to reference this step if needed
+      uses: xu-cheng/latex-action@v2
+      id: compile_latex
       with:
-        root_file: main.tex # Specifies the main .tex file to compile in your repo
-        args: -xelatex -file-line-error -interaction=nonstopmode # More robust XeLaTeX arguments
-        # Ensure the output is in the root of the workspace
-        # Output is by default in the root of the workspace for latex-action
-      # continue-on-error: true # TEMPORARY: Use this to see if the build fails but still allows release. REMOVE AFTER DIAGNOSIS.
+        root_file: main.tex
+        args: -xelatex -file-line-error -interaction=nonstopmode # Ensure xelatex is used
 
     - name: Check for compiled PDF
       run: |
@@ -42,18 +70,18 @@ jobs:
         fi
 
     - name: Create Release and Upload PDF
-      id: create_release # Unique ID for this step
-      uses: softprops/action-gh-release@v2 # Action to create a GitHub Release
-      if: startsWith(github.ref, 'refs/heads/main') # Ensures it only runs on pushes to 'main' branch
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/heads/main')
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub's auto-generated token for authentication
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v${{ github.run_number }} # Auto-generates a version tag (e.g., v1, v2, v3...)
-        name: Auto-Release ${{ github.run_number }} # Auto-generates the Release Title
-        body: | # This is the Release Description (Markdown supported)
+        tag_name: v${{ github.run_number }}
+        name: Auto-Release ${{ github.run_number }}
+        body: |
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
 
           This content is unreviewed and actively being developed. Use at your own risk.
         files: |
-          main.pdf # The compiled PDF file that will be attached to the release
+          main.pdf
