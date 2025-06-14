@@ -36,7 +36,8 @@ jobs:
     - name: Prepare Combined ZIP for Release
       id: prepare_combined_zip
       run: |
-        FINAL_ZIP_NAME="${{ github.event.repository.name }}_${{ github.sha }}.zip"
+        TAG_NAME="v${{ github.run_number }}"
+        FINAL_ZIP_NAME="${{ github.event.repository.name }}-${TAG_NAME}.zip"
         ZIP_STAGING_DIR="release_content"
         mkdir -p "$ZIP_STAGING_DIR"
 
