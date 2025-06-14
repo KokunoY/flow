@@ -10,14 +10,13 @@ on:
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # Generous timeout for overall job
+    timeout-minutes: 15
 
-    # *** IMPORTANT PERMISSION FIX ***
     permissions:
-      contents: write # This grants the necessary permission to create GitHub Releases
+      contents: write
 
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
+      image: "ghcr.io/xu-cheng/texlive-full:latest"
 
     steps:
     - name: Checkout repository
@@ -28,16 +27,16 @@ jobs:
       id: compile_latex
       with:
         root_file: main.tex
-        # *** COMPILER FIX: Use xelatex, as main.tex requires fontspec ***
         compiler: xelatex
         args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
-        ignore_errors: true # Force the action to report success for this step even with LaTeX errors
-      continue-on-error: true # Ensure the *workflow step* itself doesn't fail the job
+        ignore_errors: true
+      continue-on-error: true
 
     - name: Check for compiled PDF
       run: |
         if [ ! -f main.pdf ]; then
-          echo "Warning: main.pdf was NOT created by LaTeX compilation. This means the LaTeX document is severely broken. No PDF will be attached to the release."
+          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs. Releasing anyway."
+          exit 1
         else
           echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
         fi
@@ -56,4 +55,4 @@ jobs:
 
           This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
         files: |
-          main.pdf # Will attempt to attach main.pdf. If it doesn't exist, this step might fail gracefully or attach nothing.
+          main.pdf
