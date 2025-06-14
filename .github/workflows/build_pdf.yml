@@ -33,17 +33,25 @@ jobs:
       continue-on-error: true
 
     - name: Check for compiled PDF
+      id: check_pdf
       run: |
         if [ ! -f main.pdf ]; then
-          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs. Releasing anyway."
+          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs. No PDF will be added to the zip."
+          echo "pdf_exists=false" >> $GITHUB_OUTPUT
           exit 1
         else
           echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
+          echo "pdf_exists=true" >> $GITHUB_OUTPUT
         fi
 
-    - name: Create Release and Upload PDF
+    - name: Add PDF to repository root for release source
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
+      run: |
+        mv main.pdf .
+
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/heads/main')
+      if: steps.check_pdf.outputs.pdf_exists == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -54,5 +62,3 @@ jobs:
           Version: ${{ github.run_number }}
 
           This content is unreviewed and actively being developed. Use at your own risk.
-        files: |
-          main.pdf
