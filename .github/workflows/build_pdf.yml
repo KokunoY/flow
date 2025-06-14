@@ -13,14 +13,25 @@ jobs:
     timeout-minutes: 15
 
     permissions:
-      contents: write # Needed for creating GitHub Releases
+      contents: write
 
+    # Important: Using a container image for compilation.
+    # Ensure this image has 'zip' installed, or add a step to install it.
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
+      image: "ghcr.io/xu-cheng/texlive-full:latest" 
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    # Add a step to install 'zip' if your container image doesn't have it by default.
+    # The 'texlive-full' image usually has it, but it's good practice to ensure.
+    - name: Install Zip Utility
+      # This 'run' step will execute inside the container defined above.
+      # You might need 'apt-get install -y zip' for Debian/Ubuntu-based images.
+      run: |
+        apt-get update && apt-get install -y zip
+      # continue-on-error: true # Consider removing if 'zip' is essential and should always be available.
 
     - name: Compile LaTeX (Force Max Compatibility and Error Handling)
       uses: xu-cheng/latex-action@v2
@@ -30,33 +41,44 @@ jobs:
         compiler: xelatex
         args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
         ignore_errors: true
-      continue-on-error: true
+      continue-on-error: true # Ensure this remains true if you want a PDF even with errors
 
     - name: Check for compiled PDF
       id: check_pdf
       run: |
         if [ ! -f main.pdf ]; then
-          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs. No PDF will be added to the zip."
-          echo "pdf_exists=false" >> $GITHUB_OUTPUT
-          exit 1
+          echo "Error: main.pdf was NOT created by LaTeX compilation. Check Compile LaTeX step logs. Releasing anyway."
+          # Set an output variable to indicate PDF was not created, so subsequent steps can be skipped.
+          echo "pdf_created=false" >> "$GITHUB_OUTPUT"
+          exit 1 # Exit with error code to indicate failure to create PDF.
         else
           echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
-          echo "pdf_exists=true" >> $GITHUB_OUTPUT
+          echo "pdf_created=true" >> "$GITHUB_OUTPUT"
         fi
 
-    # *** THIS IS THE CRUCIAL STEP: MOVE PDF INTO REPOSITORY ROOT FOR ZIPPING ***
-    - name: Add PDF to repository root for inclusion in zip
-      if: steps.check_pdf.outputs.pdf_exists == 'true'
+    # NEW STEP: Create a ZIP archive of the PDF
+    - name: Create PDF ZIP Archive
+      # This step only runs if the PDF was successfully created.
+      if: steps.check_pdf.outputs.pdf_created == 'true'
       run: |
-        # The 'latex-action' often puts files in a build subdirectory.
-        # We need to move main.pdf to the /github/workspace root.
-        mv main.pdf /github/workspace/
+        ZIP_FILE_NAME="main_pdf_release_${{ github.run_number }}.zip"
+        # Create a temporary directory to structure the zip file content
+        mkdir -p temp_zip_content
+        cp main.pdf temp_zip_content/main.pdf
+        # Add any other relevant files to temp_zip_content if needed (e.g., source .tex files)
+        # cp src/*.tex temp_zip_content/
 
-    - name: Create GitHub Release
-      # This action creates a .zip of the repository's contents.
-      # Since main.pdf is now in the root, it will be included in this .zip.
+        # Zip the contents of the temporary directory
+        zip -r "$ZIP_FILE_NAME" temp_zip_content/
+        echo "Created $ZIP_FILE_NAME containing main.pdf."
+        # Make the zip file name available to subsequent steps
+        echo "zip_file_name=$ZIP_FILE_NAME" >> "$GITHUB_OUTPUT"
+      id: create_zip_archive
+
+    - name: Create Release and Upload ZIP
       uses: softprops/action-gh-release@v2
-      if: steps.check_pdf.outputs.pdf_exists == 'true'
+      # This step only runs if a ZIP file was successfully created.
+      if: startsWith(github.ref, 'refs/heads/main') && steps.check_pdf.outputs.pdf_created == 'true' && steps.create_zip_archive.outputs.zip_file_name != ''
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -65,6 +87,6 @@ jobs:
         body: |
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
-          This content is unreviewed and actively being developed. Use at your own risk.
-        # No 'files:' field here, as we don't want to attach it separately.
-        # We rely on the default .zip source archive of the repo.
+          This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
+        files: |
+          ${{ steps.create_zip_archive.outputs.zip_file_name }} # Upload the generated ZIP file
