@@ -54,6 +54,6 @@ jobs:
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
 
-          This content is a raw, unreviewed derivation from the author's notes. Use at your own risk.
+          This content is unreviewed and actively being developed. Use at your own risk.
         files: |
           main.pdf # The compiled PDF file that will be attached to the release
