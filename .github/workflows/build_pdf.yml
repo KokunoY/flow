@@ -1,69 +1,61 @@
-name: Auto-Compile LaTeX and Release
+name: Compile PDF and Commit to Repo
 
 on:
   push:
     branches:
       - main
-    paths:
-      - '**.tex'
 
 jobs:
-  build_release_asset:
+  build_and_commit_pdf:
+    # Do not run on commits made by the action itself
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
       contents: write
-
-    container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest"
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install Zip Utility
-      run: apk update && apk add zip
-
-    - name: Compile LaTeX to PDF (Force Output, Ignore Errors)
+    - name: Compile LaTeX to PDF
       uses: xu-cheng/latex-action@v2
-      id: compile_latex
       with:
         root_file: main.tex
         compiler: xelatex
         args: -file-line-error -interaction=nonstopmode -halt-on-error=false
       continue-on-error: true
 
-    - name: Prepare Combined ZIP for Release
-      id: prepare_combined_zip
+    - name: Commit and Push PDF
       run: |
-        TAG_NAME="v${{ github.run_number }}"
-        FINAL_ZIP_NAME="${{ github.event.repository.name }}-${TAG_NAME}.zip"
-        ZIP_STAGING_DIR="release_content"
-        mkdir -p "$ZIP_STAGING_DIR"
-
-        if [ -f "main.pdf" ]; then
-          mv "main.pdf" "$ZIP_STAGING_DIR/main.pdf"
+        if [ ! -f main.pdf ]; then
+          echo "main.pdf not created by LaTeX. Halting."
+          exit 1
+        fi
+        
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        
+        # Add the PDF file. This will stage it for commit,
+        # replacing the old one if it exists.
+        git add main.pdf
+        
+        # Commit only if there are changes to the PDF
+        if ! git diff --staged --quiet; then
+          git commit -m "Automated: Update generated PDF [skip ci]"
+          git push
         else
-          echo "PDF compilation failed, main.pdf not found." > "$ZIP_STAGING_DIR/COMPILATION_FAILED.txt"
+          echo "PDF has not changed. No commit needed."
         fi
 
-        find . -maxdepth 1 -name "*.tex" -exec cp {} "$ZIP_STAGING_DIR/" \;
-
-        zip -r "$FINAL_ZIP_NAME" "$ZIP_STAGING_DIR"
-        
-        echo "final_zip_name=$FINAL_ZIP_NAME" >> "$GITHUB_OUTPUT"
-        echo "zip_prepared=true" >> "$GITHUB_OUTPUT"
-
-    - name: Create GitHub Release and Upload Combined ZIP
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
-      if: steps.prepare_combined_zip.outputs.zip_prepared == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: v${{ github.run_number }}
         name: Automated Release ${{ github.run_number }}
         body: |
-          Latest automated build and release of the physics work.
-          This release contains the compiled PDF and source files in a single ZIP archive for Zenodo integration.
-        files: |
-          ${{ steps.prepare_combined_zip.outputs.final_zip_name }}
+          Latest automated build. The PDF is included directly in the source code for this tag.
