@@ -33,39 +33,55 @@ jobs:
         compiler: xelatex
         args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace -f -latexoption="-halt-on-error=false -interaction=nonstopmode"
         ignore_errors: true
-      continue-on-error: true
+      continue-on-error: true # Ensure the workflow continues even if this step has errors
 
-    - name: Prepare PDF for Release (ZIP it up)
-      id: prepare_pdf_zip
+    - name: Prepare PDF and source files for Release (ZIP it up)
+      id: prepare_zip
       run: |
         PDF_FILE="main.pdf"
         ZIP_FILE="${{ github.event.repository.name }}_release_${{ github.run_number }}.zip"
+        
+        # Create a dedicated directory to stage all files for the ZIP
+        mkdir -p zip_stage_content
 
-        if [ ! -f "$PDF_FILE" ]; then
-          touch empty_placeholder.txt
-          zip "$ZIP_FILE" empty_placeholder.txt
-          echo "zip_created=true" >> "$GITHUB_OUTPUT"
-          echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+        # Check if PDF exists and move it to the staging directory
+        if [ -f "$PDF_FILE" ]; then
+          mv "$PDF_FILE" zip_stage_content/
         else
-          mkdir -p release_content
-          mv "$PDF_FILE" release_content/
-          zip -r "$ZIP_FILE" release_content/
-          echo "zip_created=true" >> "$GITHUB_OUTPUT"
-          echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+          # If PDF not found, include a simple text file to indicate this
+          echo "PDF compilation failed or PDF not found." > zip_stage_content/compilation_status.txt
+          echo "No '$PDF_FILE' was generated. This ZIP only contains source files." >> zip_stage_content/compilation_status.txt
         fi
+
+        # Copy all .tex files (and potentially other source files like figures) into the staging directory
+        # This copies .tex files from the root.
+        find . -maxdepth 1 -name "*.tex" -exec cp {} zip_stage_content/ \;
+        # If you have other source directories like 'chapters/' or 'figures/', add them here:
+        # cp -r chapters/ zip_stage_content/
+        # cp -r figures/ zip_stage_content/
+
+        # Create the ZIP archive from the content of 'zip_stage_content'
+        # The -r flag includes the directory itself, so 'zip_stage_content' will be the top folder inside the ZIP.
+        # If you prefer files directly in the root of the ZIP, use `zip -j` or `cd zip_stage_content && zip -r ../$ZIP_FILE .`
+        zip -r "$ZIP_FILE" zip_stage_content/
+
+        echo "zip_file_name=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+        echo "zip_creation_successful=true" >> "$GITHUB_OUTPUT" # Indicate success to the next step
 
     - name: Create Release and Upload ZIP
       uses: softprops/action-gh-release@v2
-      if: steps.prepare_pdf_zip.outputs.zip_created == 'true'
+      # This step should only run if the ZIP creation was successful.
+      if: steps.prepare_zip.outputs.zip_creation_successful == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v${{ github.run_number }}
-        name: Auto-Release ${{ github.run_number }}
+        tag_name: v${{ github.run_number }} # Creates a unique tag for the release
+        name: Automated Release ${{ github.run_number }}
         body: |
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
 
-          This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
+          This release contains the compiled PDF and source files in a single ZIP archive, for Zenodo integration.
+          The PDF included may be incomplete if compilation errors occurred.
         files: |
-          ${{ steps.prepare_pdf_zip.outputs.zip_file_name }}
+          ${{ steps.prepare_zip.outputs.zip_file_name }} # Upload only the generated ZIP file
