@@ -10,14 +10,36 @@ on:
 jobs:
   build_and_release:
     runs-on: ubuntu-latest # The operating system where the job will run
+    timeout-minutes: 10 # Add a timeout to prevent long runs if it hangs
+
     steps:
-    - uses: actions/checkout@v4 # Action to check out your repository code
+    - name: Checkout repository
+      uses: actions/checkout@v4 # Action to check out your repository code
+
+    - name: Set up LaTeX environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y texlive-full # Install full TeX Live to ensure all packages are present
+        sudo apt-get install -y texlive-fonts-extra texlive-xetex # Specific for XeLaTeX and fonts if not in full
 
     - name: Compile LaTeX
       uses: xu-cheng/latex-action@v2 # Action to compile LaTeX documents
+      id: compile_latex # Add an ID to reference this step if needed
       with:
         root_file: main.tex # Specifies the main .tex file to compile in your repo
-        args: -xelatex # Uses xelatex compiler for broader compatibility
+        args: -xelatex -file-line-error -interaction=nonstopmode # More robust XeLaTeX arguments
+        # Ensure the output is in the root of the workspace
+        # Output is by default in the root of the workspace for latex-action
+      # continue-on-error: true # TEMPORARY: Use this to see if the build fails but still allows release. REMOVE AFTER DIAGNOSIS.
+
+    - name: Check for compiled PDF
+      run: |
+        if [ ! -f main.pdf ]; then
+          echo "Error: main.pdf was not created by LaTeX compilation."
+          exit 1
+        else
+          echo "main.pdf successfully created."
+        fi
 
     - name: Create Release and Upload PDF
       id: create_release # Unique ID for this step
