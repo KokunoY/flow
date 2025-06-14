@@ -13,10 +13,10 @@ jobs:
     timeout-minutes: 15
 
     permissions:
-      contents: write
+      contents: write # Needed for creating GitHub Releases
 
     container:
-      image: "ghcr.io/xu-cheng/texlive-full:latest"
+      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
 
     steps:
     - name: Checkout repository
@@ -44,12 +44,17 @@ jobs:
           echo "pdf_exists=true" >> $GITHUB_OUTPUT
         fi
 
-    - name: Add PDF to repository root for release source
+    # *** THIS IS THE CRUCIAL STEP: MOVE PDF INTO REPOSITORY ROOT FOR ZIPPING ***
+    - name: Add PDF to repository root for inclusion in zip
       if: steps.check_pdf.outputs.pdf_exists == 'true'
       run: |
-        mv main.pdf .
+        # The 'latex-action' often puts files in a build subdirectory.
+        # We need to move main.pdf to the /github/workspace root.
+        mv main.pdf /github/workspace/
 
     - name: Create GitHub Release
+      # This action creates a .zip of the repository's contents.
+      # Since main.pdf is now in the root, it will be included in this .zip.
       uses: softprops/action-gh-release@v2
       if: steps.check_pdf.outputs.pdf_exists == 'true'
       env:
@@ -60,5 +65,6 @@ jobs:
         body: |
           Automated release for ${{ github.event.repository.name }}.
           Version: ${{ github.run_number }}
-
           This content is unreviewed and actively being developed. Use at your own risk.
+        # No 'files:' field here, as we don't want to attach it separately.
+        # We rely on the default .zip source archive of the repo.
