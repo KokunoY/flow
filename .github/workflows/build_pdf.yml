@@ -1,145 +1,54 @@
-name: Compile LaTeX (Forced) and Upload to Zenodo
+name: Auto-Compile LaTeX and Release
 
 on:
   push:
     branches:
-      - main # Trigger on push to the main branch
+      - main # Trigger on pushes to the main branch
     paths:
-      - 'V74.tex' # Adjust to your main LaTeX file if named differently, e.g., main.tex
-      - '**/*.tex' # Consider if you have other .tex files that trigger recompilation
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
-
-env:
-  MAIN_TEX_FILE: V74.tex # Your main LaTeX file (assuming it's V74.tex based on your logs)
-  OUTPUT_PDF_NAME: V74.pdf # Name of the generated PDF file
+      - '**/*.tex' # Any LaTeX file change in the repo
 
 jobs:
-  build_and_upload:
-    runs-on: ubuntu-latest
+  build_and_release:
+    runs-on: ubuntu-latest # Standard runner
+    timeout-minutes: 15 # Set a generous timeout
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    container: # Job runs inside this Docker container
+      image: "ghcr.io/xu-cheng/texlive-full:latest" # Pre-built image with full TeX Live
 
-      - name: Compile LaTeX to PDF with XeLaTeX (Forced Mode)
-        uses: xu-cheng/latex-action@v3
-        with:
-          root_file: ${{ env.MAIN_TEX_FILE }}
-          compiler: xelatex
-          # Aggressive latexmk options to force PDF output
-          args: -xelatex='xelatex -interaction=nonstopmode -halt-on-error' -f -silent -max_iterations=20
-          # The -f option (force) tells latexmk to continue even if a TeX run had errors.
-          # -interaction=nonstopmode tells TeX to not stop for user input on errors.
-          # -max_iterations provides more attempts for cross-reference resolution.
-          # -silent suppresses some output, but full log is in artifacts.
-          # latexmk_shell_escape: true # Uncomment if you use shell-escape (e.g., for minted)
-          # texlive_version: 2024 # You can pin a specific TeX Live version if needed
-        # We explicitly set continue-on-error to true here because we want to try and get a PDF even if compilation fails.
-        continue-on-error: true
+    steps: # List of steps in the job
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Check for generated PDF
-        id: check_pdf_exist
-        run: |
-          if [ -f ${{ env.OUTPUT_PDF_NAME }} ]; then
-            echo "PDF file ${{ env.OUTPUT_PDF_NAME }} was generated."
-            echo "pdf_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Warning: PDF file ${{ env.OUTPUT_PDF_NAME }} was NOT generated."
-            echo "pdf_exists=false" >> $GITHUB_OUTPUT
-            # We don't exit here, allowing subsequent steps to potentially fail gracefully or be skipped.
-          fi
+    - name: Compile LaTeX (Force Max Compatibility and Error Handling)
+      uses: xu-cheng/latex-action@v2
+      id: compile_latex
+      with:
+        root_file: main.tex
+        compiler: pdflatex # Using pdflatex for maximum robustness
+        args: -file-line-error -interaction=nonstopmode -halt-on-error=false -output-directory=/github/workspace
+        ignore_errors: true # Force the action to report success for this step even with LaTeX errors
+      continue-on-error: true # Ensure the *workflow step* itself doesn't fail the job
 
-      - name: Install Zenodo client (curl and jq)
-        if: steps.check_pdf_exist.outputs.pdf_exists == 'true' # Only install if PDF exists
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl jq
+    - name: Check for compiled PDF
+      run: |
+        if [ ! -f main.pdf ]; then
+          echo "Warning: main.pdf was NOT created by LaTeX compilation. This means the LaTeX document is severely broken. No PDF will be attached to the release."
+        else
+          echo "main.pdf successfully created. It may be a partial or error-ridden PDF."
+        fi
 
-      - name: Get Zenodo deposition files
-        id: get_zenodo_files
-        if: steps.check_pdf_exist.outputs.pdf_exists == 'true' # Only run if PDF exists
-        run: |
-          DEPOSITION_ID=${{ secrets.ZENODO_DEPOSITION_ID }}
-          ZENODO_TOKEN=${{ secrets.ZENODO_TOKEN }}
-          ZENODO_URL="https://zenodo.org/api/deposit/depositions/$DEPOSITION_ID"
+    - name: Create Release and Upload PDF
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/heads/main')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Auto-Release ${{ github.run_number }}
+        body: |
+          Automated release for ${{ github.event.repository.name }}.
+          Version: ${{ github.run_number }}
 
-          # Get the list of files in the existing deposition
-          FILES_JSON=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_URL/files")
-          echo "$FILES_JSON" | jq . > zenodo_files.json
-
-          # Find the ID of the existing PDF file if it exists
-          PDF_FILE_ID=$(jq -r --arg filename "${{ env.OUTPUT_PDF_NAME }}" '.[] | select(.filename == $filename) | .id' zenodo_files.json)
-          
-          if [ -n "$PDF_FILE_ID" ]; then
-            echo "PDF_FILE_ID=$PDF_FILE_ID" >> $GITHUB_OUTPUT
-            echo "Existing PDF file found: ${{ env.OUTPUT_PDF_NAME }} with ID $PDF_FILE_ID. It will be deleted before upload."
-          else
-            echo "No existing PDF file named ${{ env.OUTPUT_PDF_NAME }} found in the deposition."
-          fi
-
-      - name: Delete existing PDF file (if found)
-        if: steps.check_pdf_exist.outputs.pdf_exists == 'true' && steps.get_zenodo_files.outputs.PDF_FILE_ID # Only run if PDF exists AND existing file ID found
-        run: |
-          DEPOSITION_ID=${{ secrets.ZENODO_DEPOSITION_ID }}
-          ZENODO_TOKEN=${{ secrets.ZENODO_TOKEN }}
-          PDF_FILE_ID=${{ steps.get_zenodo_files.outputs.PDF_FILE_ID }}
-          ZENODO_URL="https://zenodo.org/api/deposit/depositions/$DEPOSITION_ID/files/$PDF_FILE_ID"
-
-          echo "Deleting existing PDF file with ID $PDF_FILE_ID..."
-          DELETE_RESPONSE=$(curl -s -X DELETE -H "Authorization: Bearer $ZENODO_TOKEN" "$ZENODO_URL")
-          echo "Delete response: $DELETE_RESPONSE"
-          if echo "$DELETE_RESPONSE" | grep -q "204 No Content"; then
-            echo "Successfully deleted existing PDF."
-          else
-            echo "Failed to delete existing PDF. Continuing anyway, but this might cause issues on Zenodo."
-          fi
-
-      - name: Upload new PDF to Zenodo
-        if: steps.check_pdf_exist.outputs.pdf_exists == 'true' # Only run if PDF exists
-        run: |
-          DEPOSITION_ID=${{ secrets.ZENODO_DEPOSITION_ID }}
-          ZENODO_TOKEN=${{ secrets.ZENODO_TOKEN }}
-          OUTPUT_PDF="${{ env.OUTPUT_PDF_NAME }}"
-          ZENODO_BUCKET_URL=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "https://zenodo.org/api/deposit/depositions/$DEPOSITION_ID" | jq -r .links.bucket)
-
-          if [ "$ZENODO_BUCKET_URL" == "null" ]; then
-            echo "Error: Could not retrieve Zenodo bucket URL. Check DEPOSITION_ID and ZENODO_TOKEN."
-            exit 1
-          fi
-
-          echo "Uploading ${OUTPUT_PDF} to Zenodo deposition ID: ${DEPOSITION_ID}"
-          echo "Bucket URL: ${ZENODO_BUCKET_URL}"
-
-          UPLOAD_RESPONSE=$(curl -s -X PUT -H "Authorization: Bearer $ZENODO_TOKEN" --data-binary "@${OUTPUT_PDF}" "${ZENODO_BUCKET_URL}/${OUTPUT_PDF}")
-          echo "Upload response: ${UPLOAD_RESPONSE}"
-
-          if echo "$UPLOAD_RESPONSE" | jq -e 'has("checksum")' > /dev/null; then
-            echo "File uploaded successfully."
-          else
-            echo "Error uploading file: ${UPLOAD_RESPONSE}"
-            exit 1
-          fi
-
-      - name: Publish Zenodo deposit (Optional: Uncomment to auto-publish)
-        # Uncomment this step only if you are confident your metadata is complete and correct.
-        # Otherwise, the deposit will remain in "draft" mode on Zenodo for manual review/publishing.
-        # if: steps.check_pdf_exist.outputs.pdf_exists == 'true'
-        # run: |
-        #   DEPOSITION_ID=${{ secrets.ZENODO_DEPOSITION_ID }}
-        #   ZENODO_TOKEN=${{ secrets.ZENODO_TOKEN }}
-        #   PUBLISH_LINK=$(curl -s -H "Authorization: Bearer $ZENODO_TOKEN" "https://zenodo.org/api/deposit/depositions/$DEPOSITION_ID" | jq -r .links.publish)
-
-        #   if [ -n "$PUBLISH_LINK" ] && [ "$PUBLISH_LINK" != "null" ]; then
-        #     echo "Attempting to publish deposit..."
-        #     PUBLISH_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $ZENODO_TOKEN" "$PUBLISH_LINK")
-        #     echo "Publish response: $PUBLISH_RESPONSE"
-        #     if echo "$PUBLISH_RESPONSE" | jq -e 'has("id")' > /dev/null; then
-        #       echo "Deposit published successfully!"
-        #     else
-        #       echo "Failed to publish deposit. Please check Zenodo for details: ${PUBLISH_RESPONSE}"
-        #       # Do not exit 1 here if you want the overall workflow to appear successful,
-        #       # even if publishing failed.
-        #     fi
-        #   else
-        #     echo "Publish link not found for deposit ID $DEPOSITION_ID. Deposit might already be published or in an invalid state."
-        #   fi
+          This content is unreviewed and actively being developed. This release attempts to provide a PDF even if the LaTeX compilation has errors. Use at your own risk.
+        files: |
+          main.pdf # Will attempt to attach main.pdf. If it doesn't exist, this step might fail gracefully or attach nothing.
